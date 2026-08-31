@@ -55,6 +55,20 @@ static inline bool_t isPTEPageTable(pte_t *pte)
            !(pte_ptr_get_read(pte) || pte_ptr_get_write(pte) || pte_ptr_get_execute(pte));
 }
 
+
+#ifdef CONFIG_PLAT_CV1800B_DUO
+/* The physical P3.E probe observed sxstatus.MAEE=1. On C906 leaf PTEs,
+ * bits 63:59 are XTheadMae memory attributes rather than reserved bits. */
+#define THEAD_MAEE_PMA ((word_t)0x7 << 60)
+#define THEAD_MAEE_IO  (((word_t)1 << 63) | ((word_t)1 << 60))
+
+static inline pte_t CONST pte_with_thead_maee(pte_t pte, word_t memory_type)
+{
+    pte.words[0] = (pte.words[0] & ~(THEAD_MAEE_PMA | THEAD_MAEE_IO)) | memory_type;
+    return pte;
+}
+#endif
+
 /** Helper function meant only to be used for mapping the kernel
  * window.
  *
@@ -68,17 +82,21 @@ static pte_t pte_next(word_t phys_addr, bool_t is_leaf)
     uint8_t write = read;
     uint8_t exec = read;
 
-    return pte_new(ppn,
-                   0,     /* sw */
-                   is_leaf ? 1 : 0,     /* dirty (leaf)/reserved (non-leaf) */
-                   is_leaf ? 1 : 0,     /* accessed (leaf)/reserved (non-leaf) */
-                   1,     /* global */
-                   is_leaf ? 0 : 0,     /* user (leaf)/reserved (non-leaf) */
-                   exec,  /* execute */
-                   write, /* write */
-                   read,  /* read */
-                   1      /* valid */
-                  );
+    pte_t pte = pte_new(ppn,
+                        0,     /* sw */
+                        is_leaf ? 1 : 0,     /* dirty (leaf)/reserved (non-leaf) */
+                        is_leaf ? 1 : 0,     /* accessed (leaf)/reserved (non-leaf) */
+                        1,     /* global */
+                        is_leaf ? 0 : 0,     /* user (leaf)/reserved (non-leaf) */
+                        exec,  /* execute */
+                        write, /* write */
+                        read,  /* read */
+                        1      /* valid */
+                       );
+#ifdef CONFIG_PLAT_CV1800B_DUO
+    pte = pte_with_thead_maee(pte, THEAD_MAEE_PMA);
+#endif
+    return pte;
 }
 
 /* ==================== BOOT CODE STARTS HERE ==================== */
@@ -94,7 +112,11 @@ BOOT_CODE void map_kernel_frame(paddr_t paddr, pptr_t vaddr, vm_rights_t vm_righ
         /* Map devices in level 1 page table */
         paddr = ROUND_DOWN(paddr, RISCV_GET_LVL_PGSIZE_BITS(1));
         assert((paddr % RISCV_GET_LVL_PGSIZE(1)) == 0);
-        kernel_image_level1_dev_pt[RISCV_GET_PT_INDEX(vaddr, 1)] = pte_next(paddr, true);
+        pte_t pte = pte_next(paddr, true);
+#ifdef CONFIG_PLAT_CV1800B_DUO
+        pte = pte_with_thead_maee(pte, THEAD_MAEE_IO);
+#endif
+        kernel_image_level1_dev_pt[RISCV_GET_PT_INDEX(vaddr, 1)] = pte;
     } else {
         paddr = ROUND_DOWN(paddr, RISCV_GET_LVL_PGSIZE_BITS(0));
         assert((paddr % RISCV_GET_LVL_PGSIZE(0)) == 0);
@@ -179,18 +201,22 @@ BOOT_CODE void map_it_pt_cap(cap_t vspace_cap, cap_t pt_cap)
 
     targetSlot = pt_ret.ptSlot;
 
-    *targetSlot = pte_new(
-                      (addrFromPPtr(pt) >> seL4_PageBits),
-                      0, /* sw */
-                      0, /* dirty (reserved non-leaf) */
-                      0, /* accessed (reserved non-leaf) */
-                      0,  /* global */
-                      0,  /* user (reserved non-leaf) */
-                      0,  /* execute */
-                      0,  /* write */
-                      0,  /* read */
-                      1 /* valid */
-                  );
+    pte_t pte = pte_new(
+                    (addrFromPPtr(pt) >> seL4_PageBits),
+                    0, /* sw */
+                    0, /* dirty (reserved non-leaf) */
+                    0, /* accessed (reserved non-leaf) */
+                    0,  /* global */
+                    0,  /* user (reserved non-leaf) */
+                    0,  /* execute */
+                    0,  /* write */
+                    0,  /* read */
+                    1 /* valid */
+                );
+#ifdef CONFIG_PLAT_CV1800B_DUO
+    pte = pte_with_thead_maee(pte, THEAD_MAEE_PMA);
+#endif
+    *targetSlot = pte;
     sfence();
 }
 
@@ -206,18 +232,22 @@ BOOT_CODE void map_it_frame_cap(cap_t vspace_cap, cap_t frame_cap)
 
     pte_t *targetSlot = lu_ret.ptSlot;
 
-    *targetSlot = pte_new(
-                      (pptr_to_paddr(frame_pptr) >> seL4_PageBits),
-                      0, /* sw */
-                      1, /* dirty (leaf) */
-                      1, /* accessed (leaf) */
-                      0,  /* global */
-                      1,  /* user (leaf) */
-                      1,  /* execute */
-                      1,  /* write */
-                      1,  /* read */
-                      1   /* valid */
-                  );
+    pte_t pte = pte_new(
+                    (pptr_to_paddr(frame_pptr) >> seL4_PageBits),
+                    0, /* sw */
+                    1, /* dirty (leaf) */
+                    1, /* accessed (leaf) */
+                    0,  /* global */
+                    1,  /* user (leaf) */
+                    1,  /* execute */
+                    1,  /* write */
+                    1,  /* read */
+                    1   /* valid */
+                );
+#ifdef CONFIG_PLAT_CV1800B_DUO
+    pte = pte_with_thead_maee(pte, THEAD_MAEE_PMA);
+#endif
+    *targetSlot = pte;
     sfence();
 }
 
@@ -653,25 +683,30 @@ vm_rights_t CONST maskVMRights(vm_rights_t vm_rights, seL4_CapRights_t cap_right
 
 /* The rest of the file implements the RISCV object invocations */
 
-static pte_t CONST makeUserPTE(paddr_t paddr, bool_t executable, vm_rights_t vm_rights)
+static pte_t CONST makeUserPTE(paddr_t paddr, bool_t executable, vm_rights_t vm_rights,
+                               bool_t device)
 {
     word_t write = RISCVGetWriteFromVMRights(vm_rights);
     word_t read = RISCVGetReadFromVMRights(vm_rights);
     if (unlikely(!read && !write && !executable)) {
         return pte_pte_invalid_new();
     } else {
-        return pte_new(
-                   paddr >> seL4_PageBits,
-                   0, /* sw */
-                   1, /* dirty (leaf) */
-                   1, /* accessed (leaf) */
-                   0, /* global */
-                   1, /* user (leaf) */
-                   executable, /* execute */
-                   RISCVGetWriteFromVMRights(vm_rights), /* write */
-                   RISCVGetReadFromVMRights(vm_rights), /* read */
-                   1 /* valid */
-               );
+        pte_t pte = pte_new(
+                            paddr >> seL4_PageBits,
+                            0, /* sw */
+                            1, /* dirty (leaf) */
+                            1, /* accessed (leaf) */
+                            0, /* global */
+                            1, /* user (leaf) */
+                            executable, /* execute */
+                            write,
+                            read,
+                            1 /* valid */
+                        );
+#ifdef CONFIG_PLAT_CV1800B_DUO
+        pte = pte_with_thead_maee(pte, device ? THEAD_MAEE_IO : THEAD_MAEE_PMA);
+#endif
+        return pte;
     }
 }
 
@@ -789,6 +824,9 @@ static exception_t decodeRISCVPageTableInvocation(word_t label, word_t length,
                         0,  /* read */
                         1 /* valid */
                        );
+#ifdef CONFIG_PLAT_CV1800B_DUO
+    pte = pte_with_thead_maee(pte, THEAD_MAEE_PMA);
+#endif
 
     cap = cap_page_table_cap_set_capPTIsMapped(cap, 1);
     cap = cap_page_table_cap_set_capPTMappedASID(cap, asid);
@@ -902,7 +940,8 @@ static exception_t decodeRISCVFrameInvocation(word_t label, word_t length,
         cap = cap_frame_cap_set_capFMappedAddress(cap,  vaddr);
 
         bool_t executable = !vm_attributes_get_riscvExecuteNever(attr);
-        pte_t pte = makeUserPTE(frame_paddr, executable, vmRights);
+        pte_t pte = makeUserPTE(frame_paddr, executable, vmRights,
+                                cap_frame_cap_get_capFIsDevice(cap));
         setThreadState(NODE_STATE(ksCurThread), ThreadState_Restart);
         return performPageInvocationMapPTE(cap, cte, pte, lu_ret.ptSlot);
     }
