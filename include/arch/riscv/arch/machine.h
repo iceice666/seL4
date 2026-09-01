@@ -162,6 +162,11 @@ static inline void write_stvec(word_t value)
     asm volatile("csrw stvec, %0" :: "rK"(value));
 }
 
+static inline void write_scounteren(word_t value)
+{
+    asm volatile("csrw scounteren, %0" :: "rK"(value));
+}
+
 static inline word_t read_stval(void)
 {
     word_t temp;

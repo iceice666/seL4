@@ -129,6 +129,11 @@ BOOT_CODE static void init_cpu(void)
     activate_kernel_vspace();
     /* Write trap entry address to stvec */
     write_stvec((word_t)trap_entry);
+#ifdef CONFIG_RISCV_EXPORT_TIME_USER
+    /* `TM` is bit 1: permit U-mode `rdtime` while leaving cycle and instret
+     * privileged. Platform policy opts into this globally at boot. */
+    write_scounteren(BIT(1));
+#endif
     initLocalIRQController();
 #ifndef CONFIG_KERNEL_MCS
     initTimer();

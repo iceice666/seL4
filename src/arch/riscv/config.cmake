@@ -40,6 +40,13 @@ config_option(
   DEFAULT OFF
   DEPENDS "KernelArchRiscV")
 
+config_option(
+  KernelRiscvExportTimeUser
+  RISCV_EXPORT_TIME_USER
+  "Grant U-mode direct access to the RISC-V time counter by setting scounteren.TM"
+  DEFAULT OFF
+  DEPENDS "KernelArchRiscV")
+
 # Until RISC-V has instructions to count leading/trailing zeros, we provide
 # library implementations. Platforms that implement the bit manipulation
 # extension can override these settings to remove the library functions from
