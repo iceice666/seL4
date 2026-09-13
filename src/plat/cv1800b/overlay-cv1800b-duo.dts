@@ -1,0 +1,38 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0-only
+ */
+
+/ {
+    chosen {
+        /* Kernel output uses SBI; the kernel itself owns the PLIC and CLINT. */
+        seL4,kernel-devices =
+            &{/soc/interrupt-controller@70000000},
+            &{/soc/clint@74000000};
+    };
+
+    /*
+     * The board has 63.25 MiB at 0x80000000. OpenSBI occupies the first
+     * 256 KiB and is protected by PMP, so seL4's physical-memory window starts
+     * immediately after it rather than trusting the vendor Linux carve-outs.
+     */
+    memory@80040000 {
+        device_type = "memory";
+        reg = <0x00000000 0x80040000 0x00000000 0x03f00000>;
+    };
+
+    /delete-node/ memory@80000000;
+    /delete-node/ fast_image;
+    /delete-node/ cvitek-ion;
+    /delete-node/ reserved-memory;
+
+    reserved-memory {
+        #address-cells = <0x02>;
+        #size-cells = <0x02>;
+        ranges;
+
+        opensbi@80000000 {
+            reg = <0x00000000 0x80000000 0x00000000 0x00040000>;
+            no-map;
+        };
+    };
+};
