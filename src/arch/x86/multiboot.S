@@ -66,7 +66,24 @@
     .long   0x0
     .long   (__mbi2_end - __mbi2_start)
     .long  -(0xe85250d6 + (__mbi2_end - __mbi2_start))
+#ifdef CONFIG_MULTIBOOT_GRAPHICS_MODE_LINEAR
+    /* Framebuffer request tag. Multiboot2 leaves the bootloader in EGA text
+     * mode unless the image asks for a linear framebuffer, so a kernel that
+     * wants `MULTIBOOT2_TAG_FB` in the boot information must request it here.
+     * The values are a hint: the bootloader may set another mode, and zero
+     * means no preference. Non-optional on purpose — a machine with no mode to
+     * offer must fail in the bootloader, where it is still reportable, rather
+     * than boot a kernel whose only console does not exist. */
+    .align  8
+    .word   0x5     /* MULTIBOOT_HEADER_TAG_FRAMEBUFFER */
+    .word   0x0     /* flags: required */
+    .long   0x14    /* size */
+    .long   CONFIG_MULTIBOOT_GRAPHICS_MODE_WIDTH
+    .long   CONFIG_MULTIBOOT_GRAPHICS_MODE_HEIGHT
+    .long   CONFIG_MULTIBOOT_GRAPHICS_MODE_DEPTH
+#endif /* CONFIG_MULTIBOOT_GRAPHICS_MODE_LINEAR */
     /* end tag - type, flags, size */
+    .align  8
     .word   0x0
     .word   0x0
     .long   0x8
